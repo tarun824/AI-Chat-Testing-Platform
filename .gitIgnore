@@ -1,0 +1,5 @@
+.venv/
+.env
+/runs
+/datasets
+/app/__pycache__

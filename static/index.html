@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI Automation Runner</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="page">
+      <header class="header">
+        <div class="title">AI Automation Runner</div>
+        <div class="subtitle">Dataset-driven webhook automation</div>
+      </header>
+
+      <section class="section">
+        <h2>Datasets</h2>
+        <div class="row">
+          <select id="datasetSelect"></select>
+          <button id="refreshDatasets">Refresh</button>
+          <button id="loadDataset">Load</button>
+        </div>
+        <div class="row">
+          <input id="newDatasetId" placeholder="New dataset id" />
+          <button id="createDataset">Create</button>
+        </div>
+      </section>
+
+      <section class="section">
+        <h2>Dataset Editor (JSON)</h2>
+        <textarea id="datasetEditor" rows="16"></textarea>
+        <div class="row">
+          <button id="saveDataset">Save Dataset</button>
+        </div>
+      </section>
+
+      <section class="section">
+        <h2>Run Automation</h2>
+        <div class="row">
+          <select id="runMode">
+            <option value="dataset">Dataset Mode</option>
+            <option value="agent">Agent Mode</option>
+          </select>
+          <select id="agentSelect">
+            <option value="general">general</option>
+            <option value="appointment">appointment</option>
+            <option value="patient_appointment">patient_appointment</option>
+            <option value="appointment_nlp">appointment_nlp</option>
+            <option value="patient_query">patient_query</option>
+            <option value="doctor">doctor</option>
+            <option value="qna">qna</option>
+            <option value="patient_promotion">patient_promotion</option>
+            <option value="care_coordinator">care_coordinator</option>
+            <option value="postops">postops</option>
+            <option value="product">product</option>
+            <option value="negotiator">negotiator</option>
+            <option value="partner">partner</option>
+            <option value="router">router</option>
+            <option value="proactive_router">proactive_router</option>
+            <option value="summarizing">summarizing</option>
+            <option value="track_progress">track_progress</option>
+            <option value="reminder">reminder</option>
+            <option value="consent">consent</option>
+            <option value="media_success">media_success</option>
+          </select>
+          <input id="maxTurns" type="number" min="1" value="5" />
+          <button id="stopRun" class="danger">Stop Run</button>
+        </div>
+        <div class="row">
+          <input id="tagFilter" placeholder="Tag filter (comma separated)" />
+          <button id="startRun">Start Run</button>
+        </div>
+        <div class="row">
+          <div id="runStatus"></div>
+        </div>
+      </section>
+
+      <section class="section">
+        <h2>Runs</h2>
+        <div class="row">
+          <button id="refreshRuns">Refresh Runs</button>
+        </div>
+        <table class="table" id="runsTable">
+          <thead>
+            <tr>
+              <th>Run ID</th>
+              <th>Dataset</th>
+              <th>Status</th>
+              <th>Started</th>
+              <th>Ended</th>
+              <th>Cases</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </section>
+
+      <section class="section">
+        <h2>Run Details</h2>
+        <textarea id="runDetails" rows="16" readonly></textarea>
+      </section>
+    </div>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
