@@ -9,6 +9,9 @@ from bson import ObjectId
 
 from app.ai_chat import generate_next_user_message
 from app.analytics import run_analytics
+from app.auto_eval import auto_evaluate_run
+from app.case_library import DEFAULT_CASE_LIBRARY
+from app.evaluator import llm_judge
 from app.config import (
     DEFAULT_ADMIN_ID,
     DEFAULT_DISPLAY_PHONE_NUMBER,
@@ -34,8 +37,13 @@ from app.utils import (
 logger = logging.getLogger("ai_test.runner")
 
 
-async def _post_webhook(userid: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-    url = f"{WHATSAPP_WEBHOOK_BASE}/{userid}"
+async def _post_webhook(
+    userid: str,
+    payload: Dict[str, Any],
+    webhook_base: str = "",
+) -> Dict[str, Any]:
+    base = webhook_base or WHATSAPP_WEBHOOK_BASE
+    url = f"{base}/{userid}"
     async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.post(url, json=payload)
         response.raise_for_status()
@@ -119,6 +127,7 @@ async def _wait_for_bot_response(
                     "conversation_id": str(convo.get("_id")),
                     "bot_message": bot_message.get("msg", ""),
                     "bot_message_raw": bot_message,
+                    "responded_at": datetime.now(timezone.utc),
                 }
         await asyncio.sleep(poll_ms / 1000)
     return {
@@ -159,418 +168,6 @@ def _case_matches_tags(case: Dict[str, Any], tag_filter: List[str]) -> bool:
         return True
     case_tags = set(_resolve_case_tags(case))
     return all(tag in case_tags for tag in tag_filter)
-
-
-DEFAULT_CASE_LIBRARY: Dict[str, List[Dict[str, Any]]] = {
-    "appointment": [
-        {
-            "id": "appointment_book",
-            "tags": ["appointment"],
-            "text": "I want to book an appointment for next week.",
-        },
-        {
-            "id": "appointment_reschedule",
-            "tags": ["appointment"],
-            "text": "Please reschedule my appointment to another day.",
-        },
-        {
-            "id": "appointment_cancel",
-            "tags": ["appointment"],
-            "text": "Cancel my appointment, please.",
-        },
-    ],
-    "appointment_nlp": [
-        {
-            "id": "appointment_nlp_monday",
-            "tags": ["appointment_nlp", "appointment"],
-            "text": "Book me for Monday morning if available.",
-        },
-        {
-            "id": "appointment_nlp_followup",
-            "tags": ["appointment_nlp", "appointment"],
-            "text": "Schedule a follow-up appointment next week.",
-        },
-        {
-            "id": "appointment_nlp_slots",
-            "tags": ["appointment_nlp", "appointment"],
-            "text": "What slots are open for consultation?",
-        },
-    ],
-    "patient_appointment": [
-        {
-            "id": "patient_appointment_book",
-            "tags": ["patient_appointment", "appointment"],
-            "text": "I need an appointment with a doctor.",
-        },
-        {
-            "id": "patient_appointment_change",
-            "tags": ["patient_appointment", "appointment"],
-            "text": "Can I change my appointment time?",
-        },
-        {
-            "id": "patient_appointment_availability",
-            "tags": ["patient_appointment", "appointment"],
-            "text": "Is there any availability this week?",
-        },
-    ],
-    "patient_promotion": [
-        {
-            "id": "patient_promotion_offers",
-            "tags": ["patient_promotion", "promotion"],
-            "text": "Do you have any IVF offers right now?",
-        },
-        {
-            "id": "patient_promotion_packages",
-            "tags": ["patient_promotion", "promotion"],
-            "text": "Share your packages and pricing.",
-        },
-        {
-            "id": "patient_promotion_discount",
-            "tags": ["patient_promotion", "promotion"],
-            "text": "Any discounts available this month?",
-        },
-    ],
-    "patient_query": [
-        {
-            "id": "patient_query_fees",
-            "tags": ["patient_query"],
-            "text": "What are your consultation charges?",
-        },
-        {
-            "id": "patient_query_services",
-            "tags": ["patient_query"],
-            "text": "What treatments do you provide?",
-        },
-        {
-            "id": "patient_query_location",
-            "tags": ["patient_query"],
-            "text": "Where is your clinic located?",
-        },
-    ],
-    "doctor": [
-        {
-            "id": "doctor_info",
-            "tags": ["doctor"],
-            "text": "Can you share details about your doctors?",
-        },
-        {
-            "id": "doctor_experience",
-            "tags": ["doctor"],
-            "text": "How experienced are your doctors?",
-        },
-        {
-            "id": "doctor_availability",
-            "tags": ["doctor"],
-            "text": "Which doctor is available this week?",
-        },
-    ],
-    "qna": [
-        {
-            "id": "qna_timings",
-            "tags": ["qna"],
-            "text": "What are your clinic timings today?",
-        },
-        {
-            "id": "qna_working_days",
-            "tags": ["qna"],
-            "text": "Are you open on Sundays?",
-        },
-        {
-            "id": "qna_contact",
-            "tags": ["qna"],
-            "text": "How can I contact your clinic?",
-        },
-    ],
-    "care_coordinator": [
-        {
-            "id": "care_coordinator_help",
-            "tags": ["care_coordinator"],
-            "text": "I need help coordinating my treatment plan.",
-        },
-        {
-            "id": "care_coordinator_assign",
-            "tags": ["care_coordinator"],
-            "text": "Can you assign a care coordinator for me?",
-        },
-        {
-            "id": "care_coordinator_followup",
-            "tags": ["care_coordinator"],
-            "text": "I need follow-up support for my treatment.",
-        },
-    ],
-    "postops": [
-        {
-            "id": "postops_pain",
-            "tags": ["postops"],
-            "text": "I had a procedure yesterday and I am feeling pain.",
-        },
-        {
-            "id": "postops_medication",
-            "tags": ["postops"],
-            "text": "What medicines should I take after surgery?",
-        },
-        {
-            "id": "postops_precautions",
-            "tags": ["postops"],
-            "text": "Any precautions I should follow after the procedure?",
-        },
-    ],
-    "product": [
-        {
-            "id": "product_pricing",
-            "tags": ["product"],
-            "text": "Share product pricing and details.",
-        },
-        {
-            "id": "product_package",
-            "tags": ["product"],
-            "text": "Tell me about your IVF package.",
-        },
-        {
-            "id": "product_brochure",
-            "tags": ["product"],
-            "text": "Do you have a brochure for your services?",
-        },
-    ],
-    "negotiator": [
-        {
-            "id": "negotiator_price",
-            "tags": ["negotiator"],
-            "text": "Can you provide a better price for the package?",
-        },
-        {
-            "id": "negotiator_discount",
-            "tags": ["negotiator"],
-            "text": "Is there any flexibility on pricing?",
-        },
-        {
-            "id": "negotiator_offer",
-            "tags": ["negotiator"],
-            "text": "Match a lower quote I received elsewhere.",
-        },
-    ],
-    "partner": [
-        {
-            "id": "partner_query",
-            "tags": ["partner"],
-            "text": "I want to partner with your clinic. How do we proceed?",
-        },
-        {
-            "id": "partner_referral",
-            "tags": ["partner"],
-            "text": "Do you have a referral or partnership program?",
-        },
-        {
-            "id": "partner_corporate",
-            "tags": ["partner"],
-            "text": "Interested in a corporate tie-up. Please share details.",
-        },
-    ],
-    "madhavbaug": [
-        {
-            "id": "madhavbaug_about",
-            "tags": ["madhavbaug"],
-            "text": "Tell me about the Madhavbaug program.",
-        },
-        {
-            "id": "madhavbaug_eligibility",
-            "tags": ["madhavbaug"],
-            "text": "Who is eligible for Madhavbaug treatment?",
-        },
-        {
-            "id": "madhavbaug_pricing",
-            "tags": ["madhavbaug"],
-            "text": "What is the pricing for Madhavbaug services?",
-        },
-    ],
-    "router": [
-        {
-            "id": "router_general",
-            "tags": ["router"],
-            "text": "Hello, I need help with my treatment.",
-        },
-        {
-            "id": "router_confused",
-            "tags": ["router"],
-            "text": "I am not sure what I need. Can you help?",
-        },
-        {
-            "id": "router_services",
-            "tags": ["router"],
-            "text": "Can you guide me on the next steps?",
-        },
-    ],
-    "proactive_router": [
-        {
-            "id": "proactive_router_followup",
-            "tags": ["proactive_router"],
-            "text": "I missed your call. Please follow up.",
-        },
-        {
-            "id": "proactive_router_offer",
-            "tags": ["proactive_router", "promotion"],
-            "text": "Are there any special offers for me?",
-        },
-        {
-            "id": "proactive_router_schedule",
-            "tags": ["proactive_router", "appointment"],
-            "text": "Can you schedule a quick call with me?",
-        },
-    ],
-    "summarizing": [
-        {
-            "id": "summarizing_chat",
-            "tags": ["summarizing"],
-            "text": "Please summarize my recent conversation.",
-        },
-        {
-            "id": "summarizing_treatment",
-            "tags": ["summarizing"],
-            "text": "Summarize my treatment plan details.",
-        },
-        {
-            "id": "summarizing_next_steps",
-            "tags": ["summarizing"],
-            "text": "Summarize the next steps for me.",
-        },
-    ],
-    "track_progress": [
-        {
-            "id": "track_progress_status",
-            "tags": ["track_progress"],
-            "text": "Can you tell me my treatment progress status?",
-        },
-        {
-            "id": "track_progress_update",
-            "tags": ["track_progress"],
-            "text": "Any update on my progress?",
-        },
-        {
-            "id": "track_progress_report",
-            "tags": ["track_progress"],
-            "text": "Share my progress report.",
-        },
-    ],
-    "reminder": [
-        {
-            "id": "reminder_request",
-            "tags": ["reminder"],
-            "text": "Please remind me about my appointment tomorrow.",
-        },
-        {
-            "id": "reminder_medicine",
-            "tags": ["reminder"],
-            "text": "Set a reminder for my medicine schedule.",
-        },
-        {
-            "id": "reminder_followup",
-            "tags": ["reminder"],
-            "text": "Remind me for my follow-up visit.",
-        },
-    ],
-    "media_success": [
-        {
-            "id": "media_success_report",
-            "tags": ["media_success"],
-            "text": "I have uploaded my report.",
-        },
-        {
-            "id": "media_success_document",
-            "tags": ["media_success"],
-            "text": "Please confirm if my document is received.",
-        },
-        {
-            "id": "media_success_image",
-            "tags": ["media_success"],
-            "text": "I sent an image. Did you get it?",
-        },
-    ],
-    "media_sucess": [
-        {
-            "id": "media_sucess_report",
-            "tags": ["media_sucess"],
-            "text": "I uploaded my lab report.",
-        },
-        {
-            "id": "media_sucess_document",
-            "tags": ["media_sucess"],
-            "text": "Please check my uploaded files.",
-        },
-        {
-            "id": "media_sucess_image",
-            "tags": ["media_sucess"],
-            "text": "I shared a document just now.",
-        },
-    ],
-    "consent": [
-        {
-            "id": "consent_yes",
-            "tags": ["consent"],
-            "text": "Yes, I consent to the terms.",
-        },
-        {
-            "id": "consent_info",
-            "tags": ["consent"],
-            "text": "Please explain the consent process.",
-        },
-        {
-            "id": "consent_confirm",
-            "tags": ["consent"],
-            "text": "I agree to proceed.",
-        },
-    ],
-    "agents": [
-        {
-            "id": "agents_appointment",
-            "tags": ["agents", "appointment"],
-            "text": "I want to book an appointment.",
-        },
-        {
-            "id": "agents_query",
-            "tags": ["agents", "patient_query"],
-            "text": "Tell me about your services and pricing.",
-        },
-        {
-            "id": "agents_promotion",
-            "tags": ["agents", "promotion"],
-            "text": "Do you have any offers?",
-        },
-    ],
-    "mixed": [
-        {
-            "id": "mixed_query",
-            "tags": ["mixed", "patient_query"],
-            "text": "What are the consultation fees?",
-        },
-        {
-            "id": "mixed_appointment",
-            "tags": ["mixed", "appointment"],
-            "text": "Book an appointment for next week.",
-        },
-        {
-            "id": "mixed_promotion",
-            "tags": ["mixed", "promotion"],
-            "text": "Share your latest packages or offers.",
-        },
-    ],
-    "default": [
-        {
-            "id": "default_ping",
-            "tags": ["auto"],
-            "text": "Hello, I need help.",
-        },
-        {
-            "id": "default_info",
-            "tags": ["auto"],
-            "text": "Please share more information.",
-        },
-        {
-            "id": "default_support",
-            "tags": ["auto"],
-            "text": "I want to talk to support.",
-        },
-    ],
-}
 
 
 def _default_case_text(dataset: Dict[str, Any], defaults: Dict[str, Any]) -> str:
@@ -641,8 +238,10 @@ async def _execute_case(
     case: Dict[str, Any],
     run_id: str,
     stop_event: Optional[asyncio.Event] = None,
+    env: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     _raise_if_stopped(stop_event)
+    env = env or {}
     defaults = dataset.get("defaults", {}) or {}
     payload = case.get("webhook_payload") or {}
     if not payload:
@@ -652,17 +251,19 @@ async def _execute_case(
         )
     payload = normalize_payload(payload)
 
-    userid = case.get("userid") or defaults.get("userid") or DEFAULT_USER_ID or ""
-    admin_id = case.get("admin_id") or defaults.get("admin_id") or DEFAULT_ADMIN_ID or ""
+    # Resolution order: case → dataset.defaults → env → config
+    userid   = case.get("userid")   or defaults.get("userid")   or env.get("user_id")  or DEFAULT_USER_ID  or ""
+    admin_id = case.get("admin_id") or defaults.get("admin_id") or env.get("admin_id") or DEFAULT_ADMIN_ID or ""
     if not admin_id and userid:
         admin_id = userid
     if not userid and admin_id:
         userid = admin_id
 
     unique_contact = bool(defaults.get("unique_contact_per_case", True))
-    contact_name = DEFAULT_USER_NAME or defaults.get("contact_name", "Automation User")
-    country_code = defaults.get("country_code", "91")
-    fixed_phone = DEFAULT_PHONE_NUMBER or ""
+    # contact_name: dataset defaults → env → config (fixes original priority bug)
+    contact_name = defaults.get("contact_name") or env.get("contact_name") or DEFAULT_USER_NAME or "Automation User"
+    country_code = defaults.get("country_code") or env.get("country_code") or "91"
+    fixed_phone = defaults.get("phone") or env.get("phone_number") or DEFAULT_PHONE_NUMBER or ""
 
     message_id, contact_phone = apply_unique_message_and_contact(
         payload,
@@ -673,10 +274,16 @@ async def _execute_case(
     )
 
     phone_number_id = (
-        defaults.get("phone_number_id", "") or DEFAULT_PHONE_NUMBER_ID or ""
+        defaults.get("phone_number_id", "")
+        or env.get("phone_number_id", "")
+        or DEFAULT_PHONE_NUMBER_ID
+        or ""
     )
     display_phone_number = (
-        defaults.get("display_phone_number", "") or DEFAULT_DISPLAY_PHONE_NUMBER or ""
+        defaults.get("display_phone_number", "")
+        or env.get("display_phone_number", "")
+        or DEFAULT_DISPLAY_PHONE_NUMBER
+        or ""
     )
 
     if admin_id and (not phone_number_id or not display_phone_number):
@@ -688,29 +295,18 @@ async def _execute_case(
     set_phone_metadata(payload, phone_number_id, display_phone_number)
 
     if not userid:
-        return {
-            "case_id": case.get("id"),
-            "status": "failed",
-            "error": "missing_userid",
-        }
+        return {"case_id": case.get("id"), "status": "failed", "error": "missing_userid"}
     if not admin_id:
-        return {
-            "case_id": case.get("id"),
-            "status": "failed",
-            "error": "missing_admin_id",
-        }
+        return {"case_id": case.get("id"), "status": "failed", "error": "missing_admin_id"}
 
     _raise_if_stopped(stop_event)
     started_at = datetime.now(timezone.utc)
 
+    webhook_base = env.get("webhook_base_url", "") or WHATSAPP_WEBHOOK_BASE
     try:
-        webhook_response = await _post_webhook(userid, payload)
+        webhook_response = await _post_webhook(userid, payload, webhook_base=webhook_base)
     except Exception as exc:
-        return {
-            "case_id": case.get("id"),
-            "status": "failed",
-            "error": f"webhook_error: {exc}",
-        }
+        return {"case_id": case.get("id"), "status": "failed", "error": f"webhook_error: {exc}"}
 
     _raise_if_stopped(stop_event)
     poll_timeout = int(defaults.get("poll_timeout_sec", DEFAULT_POLL_TIMEOUT_SECONDS))
@@ -737,12 +333,27 @@ async def _execute_case(
         stop_event=stop_event,
     )
 
+    responded_at = actual.pop("responded_at", None)
+    latency_ms = None
+    if responded_at:
+        latency_ms = int((responded_at - started_at).total_seconds() * 1000)
+
     expected = case.get("expected", {}) or {}
     evaluation = _evaluate_case(expected, actual)
+
+    rubric = expected.get("llm_judge") or ""
+    if rubric:
+        user_message = case.get("user_message") or _default_case_text(dataset, defaults)
+        bot_response = actual.get("bot_message", "")
+        judge_result = await llm_judge(user_message, bot_response, rubric)
+        evaluation["llm_judge"] = judge_result
+        if judge_result.get("pass") is False:
+            evaluation["pass"] = False
 
     return {
         "case_id": case.get("id"),
         "status": "completed" if evaluation["pass"] else "failed",
+        "latency_ms": latency_ms,
         "message_id": message_id,
         "contact_phone": contact_phone,
         "contact_id": contact_id,
@@ -758,19 +369,22 @@ async def run_dataset_with_id(
     dataset: Dict[str, Any],
     tag_filter: Optional[List[str]] = None,
     stop_event: Optional[asyncio.Event] = None,
+    env: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     tag_filter = tag_filter or []
 
     run_record = {
         "run_id": run_id,
         "dataset_id": dataset.get("dataset_id"),
+        "mode": "dataset",
         "status": "running",
         "started_at": datetime.now(timezone.utc).isoformat(),
         "ended_at": "",
         "filters": {"tags": tag_filter},
+        "environment_id": (env or {}).get("env_id", ""),
+        "environment_name": (env or {}).get("name", ""),
         "cases": [],
     }
-
     update_run(run_id, run_record)
 
     cases = dataset.get("cases", []) or []
@@ -781,9 +395,7 @@ async def run_dataset_with_id(
         for case in cases:
             if not _case_matches_tags(case, tag_filter):
                 continue
-            result = await _execute_case(
-                dataset, case, run_id, stop_event=stop_event
-            )
+            result = await _execute_case(dataset, case, run_id, stop_event=stop_event, env=env)
             run_record["cases"].append(result)
             update_run(run_id, run_record)
     except RunStopped:
@@ -794,12 +406,9 @@ async def run_dataset_with_id(
 
     run_record["status"] = "completed"
     run_record["ended_at"] = datetime.now(timezone.utc).isoformat()
-
     update_run(run_id, run_record)
-    print("ENABLE_ANALYTICS", ENABLE_ANALYTICS)
 
     if ENABLE_ANALYTICS:
-        print("Enabling analytics for ENABLE_ANALYTICS", run_record)
         analytics = await run_analytics(run_record)
         if analytics is not None:
             run_record["analytics"] = analytics
@@ -814,12 +423,12 @@ async def run_agent_conversation_with_id(
     agent: str,
     max_turns: int,
     stop_event: Optional[asyncio.Event] = None,
+    custom_system_prompt: Optional[str] = None,
+    env: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     logger.info(
-        "agent_mode.start run_id=%s agent=%s max_turns=%s",
-        run_id,
-        agent,
-        max_turns,
+        "agent_mode.start run_id=%s agent=%s max_turns=%s custom_prompt=%s env=%s",
+        run_id, agent, max_turns, bool(custom_system_prompt), (env or {}).get("env_id", ""),
     )
     run_record = {
         "run_id": run_id,
@@ -828,9 +437,12 @@ async def run_agent_conversation_with_id(
         "mode": "agent",
         "agent": agent,
         "max_turns": max_turns,
+        "custom_system_prompt": custom_system_prompt or "",
         "started_at": datetime.now(timezone.utc).isoformat(),
         "ended_at": "",
         "filters": {"tags": []},
+        "environment_id": (env or {}).get("env_id", ""),
+        "environment_name": (env or {}).get("name", ""),
         "cases": [],
     }
     update_run(run_id, run_record)
@@ -842,26 +454,23 @@ async def run_agent_conversation_with_id(
     try:
         for turn in range(max_turns):
             _raise_if_stopped(stop_event)
-            user_message = await generate_next_user_message(agent, history)
+            user_message = await generate_next_user_message(
+                agent, history, custom_system_prompt=custom_system_prompt
+            )
             logger.info(
                 "agent_mode.turn run_id=%s turn=%s user_message=%s",
-                run_id,
-                turn + 1,
-                user_message,
+                run_id, turn + 1, user_message,
             )
             case = {
                 "id": f"turn_{turn + 1}",
                 "tags": [agent, "agent"],
-                "webhook_payload": build_text_webhook_payload(
-                    user_message, contact_name
-                ),
+                "webhook_payload": build_text_webhook_payload(user_message, contact_name),
                 "expected": {},
             }
-            result = await _execute_case(
-                dataset, case, run_id, stop_event=stop_event
-            )
+            result = await _execute_case(dataset, case, run_id, stop_event=stop_event, env=env)
             result["user_message"] = user_message
             result["turn"] = turn + 1
+            result["case_id"] = f"turn_{turn + 1}"
             run_record["cases"].append(result)
             update_run(run_id, run_record)
 
@@ -888,12 +497,17 @@ async def run_agent_conversation_with_id(
     update_run(run_id, run_record)
 
     if ENABLE_ANALYTICS:
-        logger.info("agent_mode.analytics_start run_id=%s", run_id)
         analytics = await run_analytics(run_record)
         if analytics is not None:
             run_record["analytics"] = analytics
             update_run(run_id, run_record)
-            logger.info("agent_mode.analytics_done run_id=%s", run_id)
+
+    auto_eval = await auto_evaluate_run(run_record)
+    if auto_eval is not None:
+        run_record["auto_eval"] = auto_eval
+        update_run(run_id, run_record)
+        logger.info("agent_mode.auto_eval_done run_id=%s verdict=%s", run_id, auto_eval.get("overall_verdict"))
+
     return run_record
 
 
@@ -903,6 +517,8 @@ async def start_run(
     mode: str = "dataset",
     agent: str = "",
     max_turns: int = 0,
+    custom_system_prompt: Optional[str] = None,
+    env: Optional[Dict[str, Any]] = None,
 ) -> str:
     run_id = f"run-{uuid.uuid4().hex}"
     run_record = {
@@ -912,9 +528,12 @@ async def start_run(
         "mode": mode,
         "agent": agent,
         "max_turns": max_turns,
+        "custom_system_prompt": custom_system_prompt or "",
         "started_at": "",
         "ended_at": "",
         "filters": {"tags": tag_filter or []},
+        "environment_id": (env or {}).get("env_id", ""),
+        "environment_name": (env or {}).get("name", ""),
         "cases": [],
     }
     create_run(run_id, run_record)

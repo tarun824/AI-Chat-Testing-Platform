@@ -7,6 +7,13 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.config import DEFAULT_AGENT_MAX_TURNS, STATIC_DIR
+from app.env_storage import (
+    ensure_environments_dir,
+    list_environments,
+    load_environment,
+    save_environment,
+    delete_environment,
+)
 from app.runner import (
     run_agent_conversation_with_id,
     run_dataset_with_id,
@@ -46,11 +53,28 @@ STOP_EVENTS: Dict[str, asyncio.Event] = {}
 @app.on_event("startup")
 async def startup_event() -> None:
     ensure_storage_dirs()
+    ensure_environments_dir()
 
 
 @app.get("/health")
 async def health() -> Dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/api/agents")
+async def api_list_agents() -> List[Dict[str, Any]]:
+    from app.ai_chat import AGENT_SYSTEM_PROMPTS, AGENT_ALIASES
+    seen: set = set()
+    result = []
+    for alias, canonical in AGENT_ALIASES.items():
+        if canonical not in seen:
+            seen.add(canonical)
+            result.append({
+                "name": canonical,
+                "aliases": [k for k, v in AGENT_ALIASES.items() if v == canonical],
+                "system_prompt": AGENT_SYSTEM_PROMPTS.get(canonical, ""),
+            })
+    return result
 
 
 @app.get("/api/datasets")
@@ -113,6 +137,8 @@ async def api_start_run(request: Request) -> Dict[str, Any]:
     tags = payload.get("tags", []) or []
     agent = (payload.get("agent") or "").strip()
     max_turns = int(payload.get("max_turns") or DEFAULT_AGENT_MAX_TURNS)
+    custom_system_prompt = (payload.get("custom_system_prompt") or "").strip() or None
+    environment_id = (payload.get("environment_id") or "").strip()
 
     if mode not in ["dataset", "agent"]:
         raise HTTPException(status_code=400, detail="invalid_mode")
@@ -127,15 +153,28 @@ async def api_start_run(request: Request) -> Dict[str, Any]:
     else:
         dataset = {"dataset_id": "agent_mode", "defaults": {}, "cases": []}
 
-    run_id = await start_run(dataset, tags, mode=mode, agent=agent, max_turns=max_turns)
+    # Resolve environment — None falls back to config.py DEFAULT_* values
+    env: Dict[str, Any] | None = None
+    if environment_id:
+        try:
+            env = load_environment(environment_id)
+        except FileNotFoundError:
+            raise HTTPException(status_code=400, detail=f"environment_not_found: {environment_id}")
+
+    run_id = await start_run(
+        dataset, tags, mode=mode, agent=agent,
+        max_turns=max_turns, custom_system_prompt=custom_system_prompt,
+        env=env,
+    )
     logger.info(
-        "run.start mode=%s run_id=%s dataset_id=%s agent=%s max_turns=%s tags=%s",
+        "run.start mode=%s run_id=%s dataset_id=%s agent=%s max_turns=%s tags=%s env=%s",
         mode,
         run_id,
         dataset.get("dataset_id"),
         agent,
         max_turns,
         tags,
+        environment_id or "none",
     )
     STOP_EVENTS[run_id] = asyncio.Event()
 
@@ -148,10 +187,14 @@ async def api_start_run(request: Request) -> Dict[str, Any]:
                     agent,
                     max_turns,
                     stop_event=STOP_EVENTS.get(run_id),
+                    custom_system_prompt=custom_system_prompt,
+                    env=env,
                 )
             else:
                 await run_dataset_with_id(
-                    run_id, dataset, tags, stop_event=STOP_EVENTS.get(run_id)
+                    run_id, dataset, tags,
+                    stop_event=STOP_EVENTS.get(run_id),
+                    env=env,
                 )
         finally:
             RUNNING_TASKS.pop(run_id, None)
@@ -175,6 +218,45 @@ async def api_stop_run(run_id: str) -> Dict[str, Any]:
     except FileNotFoundError:
         pass
     return {"run_id": run_id, "status": "stopping"}
+
+
+@app.get("/api/environments")
+async def api_list_environments() -> List[Dict[str, Any]]:
+    return list_environments()
+
+
+@app.get("/api/environments/{env_id}")
+async def api_get_environment(env_id: str) -> Dict[str, Any]:
+    try:
+        return load_environment(env_id)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="environment_not_found")
+
+
+@app.post("/api/environments")
+async def api_create_environment(request: Request) -> Dict[str, Any]:
+    payload = await request.json()
+    env_id = (payload.get("env_id") or "").strip().lower().replace(" ", "_")
+    if not env_id:
+        raise HTTPException(status_code=400, detail="env_id_required")
+    payload["env_id"] = env_id
+    return save_environment(env_id, payload)
+
+
+@app.put("/api/environments/{env_id}")
+async def api_update_environment(env_id: str, request: Request) -> Dict[str, Any]:
+    payload = await request.json()
+    payload["env_id"] = env_id
+    return save_environment(env_id, payload)
+
+
+@app.delete("/api/environments/{env_id}")
+async def api_delete_environment(env_id: str) -> Dict[str, str]:
+    try:
+        delete_environment(env_id)
+    except Exception:
+        pass
+    return {"deleted": env_id}
 
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")

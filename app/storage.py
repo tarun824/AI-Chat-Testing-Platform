@@ -141,17 +141,30 @@ def load_run(run_id: str) -> Dict[str, Any]:
 def list_runs() -> List[Dict[str, Any]]:
     ensure_storage_dirs()
     runs = []
-    for path in sorted(RUNS_DIR.glob("*.json")):
+    for path in sorted(RUNS_DIR.glob("*.json"), reverse=True):
         try:
             data = _load_json(path)
+            cases = data.get("cases", []) or []
+            passed = sum(
+                1 for c in cases
+                if (c.get("evaluation") or {}).get("pass") or c.get("status") == "completed"
+            )
+            auto_eval = data.get("auto_eval") or {}
             runs.append(
                 {
                     "run_id": data.get("run_id", path.stem),
                     "dataset_id": data.get("dataset_id", ""),
                     "status": data.get("status", ""),
+                    "mode": data.get("mode", "dataset"),
+                    "agent": data.get("agent", ""),
+                    "custom_system_prompt": data.get("custom_system_prompt", ""),
                     "started_at": data.get("started_at", ""),
                     "ended_at": data.get("ended_at", ""),
-                    "case_count": len(data.get("cases", []) or []),
+                    "case_count": len(cases),
+                    "passed_count": passed,
+                    "auto_eval_verdict": auto_eval.get("overall_verdict", ""),
+                    "environment_id": data.get("environment_id", ""),
+                    "environment_name": data.get("environment_name", ""),
                 }
             )
         except Exception:

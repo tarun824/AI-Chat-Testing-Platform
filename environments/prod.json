@@ -1,0 +1,13 @@
+{
+  "env_id": "prod",
+  "name": "Prod",
+  "color": "red",
+  "webhook_base_url": "http://127.0.0.1:8002/api/whatsapp/meta/webhook",
+  "admin_id": "69a90e93c3f4c91b920771d0",
+  "user_id": "69a90e93c3f4c91b920771d0",
+  "phone_number_id": "939300612609620",
+  "display_phone_number": "916366418865",
+  "phone_number": "+917676286822",
+  "contact_name": "Prodoc",
+  "country_code": "91"
+}

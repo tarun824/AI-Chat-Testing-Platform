@@ -1,0 +1,13 @@
+{
+  "env_id": "dev",
+  "name": "Dev",
+  "color": "slate",
+  "webhook_base_url": "https://dev.example.com/hook",
+  "admin_id": "dev_admin",
+  "user_id": "dev_user",
+  "phone_number": "9999999999",
+  "phone_number_id": "111",
+  "display_phone_number": "+919999999999",
+  "contact_name": "Dev Tester",
+  "country_code": "91"
+}

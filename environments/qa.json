@@ -1,0 +1,13 @@
+{
+  "env_id": "qa",
+  "name": "QA",
+  "color": "blue",
+  "webhook_base_url": "",
+  "admin_id": "",
+  "user_id": "",
+  "phone_number": "",
+  "phone_number_id": "",
+  "display_phone_number": "",
+  "contact_name": "Automation User",
+  "country_code": "91"
+}

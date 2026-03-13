@@ -1,6 +1,6 @@
 import logging
 import httpx
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from app.config import OPENAI_API_KEY, OPENAI_MODEL
 
@@ -149,14 +149,17 @@ def _format_history(history: List[Dict[str, str]]) -> str:
 
 
 async def generate_next_user_message(
-    agent: str, history: List[Dict[str, str]], max_words: int = 25
+    agent: str,
+    history: List[Dict[str, str]],
+    max_words: int = 25,
+    custom_system_prompt: Optional[str] = None,
 ) -> str:
     if not OPENAI_API_KEY:
         logger.error("ai_chat missing OPENAI_API_KEY")
         raise ValueError("missing_openai_api_key")
 
     normalized = _normalize_agent(agent)
-    system_prompt = AGENT_SYSTEM_PROMPTS.get(
+    system_prompt = custom_system_prompt or AGENT_SYSTEM_PROMPTS.get(
         normalized, AGENT_SYSTEM_PROMPTS["general"]
     )
     history_text = _format_history(history)
